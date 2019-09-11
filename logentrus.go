@@ -2,6 +2,8 @@
 // for Logrus (https://github.com/Sirupsen/logrus)
 package logentrus
 
+// Override "github.com/jonathan-robertson/logentrus" to make logs async
+
 import (
 	"crypto/tls"
 	"fmt"
@@ -109,9 +111,7 @@ func (hook *Hook) Fire(entry *logrus.Entry) (err error) {
 		return err
 	}
 
-	if err = hook.write(line); err != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: unable to write to conn | err: %v | line: %s\n", err, line)
-	}
+	go write(hook, line)
 
 	return
 }
@@ -124,15 +124,6 @@ func (hook Hook) dial() (net.Conn, error) {
 	return net.Dial(hook.network, fmt.Sprintf("%s:%d", host, hook.port))
 }
 
-// write dials a connection and writes token and line in bytes to connection
-func (hook *Hook) write(line string) (err error) {
-	if conn, err := hook.dial(); err == nil {
-		defer conn.Close()
-		_, err = conn.Write([]byte(hook.token + line))
-	}
-	return
-}
-
 // format serializes the entry as JSON regardless of logentries's overall formatting
 func (hook Hook) format(entry *logrus.Entry) (string, error) {
 	serialized, err := hook.formatter.Format(entry)
@@ -141,4 +132,16 @@ func (hook Hook) format(entry *logrus.Entry) (string, error) {
 	}
 	str := string(serialized)
 	return str, nil
+}
+
+// This function is changed so that it can be called as a go routine
+// write dials a connection and writes token and line in bytes to connection
+func write(hook *Hook, line string) {
+	if conn, err := hook.dial(); err == nil {
+		_, err = conn.Write([]byte(hook.token + line))
+		err = conn.Close()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: unable to write to conn | err: %v | line: %s\n", err, line)
+		}
+	}
 }
